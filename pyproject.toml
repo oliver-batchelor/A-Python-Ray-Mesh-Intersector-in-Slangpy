@@ -1,0 +1,31 @@
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[project]
+name = "slang-bvh"
+version = "0.1.0"
+dependencies = [
+    "torch",
+    "beartype",
+    "colored-traceback",
+    "tensordict",
+    "rich",
+    "slangpy",
+    "termcolor",
+    "tensordict>=0.7.0",
+    "tqdm",
+    "pandas",
+    "pyexr",
+    "trimesh"
+]
+
+[tool.setuptools.package-dir]
+"slang_bvh" = "slang_bvh"
+
+
+[project.scripts]
+test-render = "ray_splatting.scripts.test_render:main"
+test-ellipsoid =  "ray_splatting.scripts.test_ellipsoid:main"
+
+build-pipeline = "ray_splatting.build_module.build_pipeline:main"
