@@ -17,7 +17,7 @@ class BVH:
 
   @staticmethod 
   def from_df(df: pd.DataFrame):
-    primitive_idx = df['primitiveIdx'].values
+    primitive_idx = df['primitive_idx'].values
     left = df['left'].values
     right = df['right'].values
     aabb_min = np.array([df['aabb_min_x'].values, df['aabb_min_y'].values, df['aabb_min_z'].values]).T

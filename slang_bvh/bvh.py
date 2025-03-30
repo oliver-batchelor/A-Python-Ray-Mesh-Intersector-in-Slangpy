@@ -5,11 +5,15 @@ import torch
 from tensordict import TensorClass
 import slangtorch
 import trimesh
+
+from slang_bvh.util.radix_sort import radix_sort_pairs
   
 slang_path = Path(__file__).parent / 'slang'
 module = slangtorch.loadModule(slang_path / 'slang_bvh.slang', 
                                extraCudaFlags=["-diag-suppress=177"],
                                extraSlangFlags=["-O3"])
+
+
 
 
 def round_up(x, multiple):
@@ -51,9 +55,9 @@ class BVH(TensorClass):
   @staticmethod 
   def init(n:int, device:str) -> 'BVH':
     return BVH(
-      info = torch.zeros((n, 3), dtype=torch.int, device=device),
-      aabb = torch.zeros((n, 6), dtype=torch.float, device=device),
-      construction_info = torch.zeros((n, 2), dtype=torch.int, device=device)
+      info = torch.empty((n, 3), dtype=torch.int, device=device),
+      aabb = torch.empty((n, 6), dtype=torch.float, device=device),
+      construction_info = torch.empty((n, 2), dtype=torch.int, device=device)
     )
 
 
@@ -68,18 +72,32 @@ class MeshBVH:
     return self.mesh.device
 
   def intersect(self, ray_origins:torch.Tensor, ray_directions:torch.Tensor) -> tuple[torch.Tensor, torch.Tensor]:
-    num_rays = ray_origins.shape[0]
-    hit_idx = torch.zeros((num_rays,), dtype=torch.int, device=self.device)
-    hit_t = torch.zeros((num_rays,), dtype=torch.float, device=self.device)
+    assert ray_origins.dim() == 3 and ray_origins.shape[2] == 3, f"Expected 3D tensor with shape (N, 3), got {ray_origins.shape}"
+    h, w = ray_origins.shape[:2]
 
-    module.intersect(num_rays=int(num_rays), ray_origins=ray_origins, ray_directions=ray_directions,
+    hit_idx = torch.empty((h, w), dtype=torch.int, device=self.device)
+    hit_t = torch.empty((h, w), dtype=torch.float, device=self.device)
+
+    module.intersect(ray_origins=ray_origins, ray_directions=ray_directions,
                   bvh_info=self.bvh.info, bvh_aabb=self.bvh.aabb,
                   vert=self.mesh.vertices, v_indx=self.mesh.indices,
                   hit_idx=hit_idx, hit_t=hit_t
-      ).launchRaw(blockSize=(256, 1, 1), gridSize=(round_up(num_rays, 256), 1, 1))
+      ).launchRaw(blockSize=(16, 16, 1), gridSize=(round_up(h, 16), round_up(w, 16), 1))
     
     return hit_t, hit_idx
 
+
+def aabb_morton_codes(aabb:torch.Tensor) -> torch.Tensor:
+  min_extent = aabb[:, 0:3].min(0).values.tolist()
+  max_extent = aabb[:, 3:6].max(0).values.tolist()
+  
+  num_elems = aabb.shape[0]
+  morton_codes = torch.zeros((num_elems, 2), dtype=torch.int, device=aabb.device)
+  module.morton_codes_aabb(num_elements=num_elems, min_extent=min_extent, max_extent=max_extent, 
+                            aabb=aabb, morton_codes=morton_codes
+    ).launchRaw(blockSize=(256, 1, 1), gridSize=(round_up(num_elems, 256), 1, 1))
+
+  return morton_codes
 
 
 class BVHBuilder:
@@ -93,58 +111,30 @@ class BVHBuilder:
       prim_idx = torch.arange(0, num_elems, dtype=torch.int32, device=mesh.device)
 
       ele_aabb = mesh.aabb()
-      min_extent = ele_aabb[:, 0:3].min(0).values.tolist()
-      max_extent = ele_aabb[:, 3:6].max(0).values.tolist()
+      morton_codes = aabb_morton_codes(ele_aabb)
+      radix_sort_pairs(morton_codes)
 
-      
-      morton_codes = torch.zeros((num_elems, 2), dtype=torch.int, device=self.device)
-      module.morton_codes_aabb(num_elements=num_elems, min_extent=min_extent, max_extent=max_extent, 
-                               aabb=ele_aabb, morton_codes=morton_codes
-        ).launchRaw(blockSize=(256, 1, 1), gridSize=(round_up(num_elems, 256), 1, 1))
-
-
-      #--------------------------------------------------
-      # radix sort part
-      morton_codes_pingpong = torch.zeros((num_elems, 2), dtype=torch.int, device=self.device)
-      module.radix_sort(g_num_elements=num_elems, 
-                             g_elements_in=morton_codes, g_elements_out=morton_codes_pingpong
-        ).launchRaw(blockSize=(256, 1, 1), gridSize=(1, 1, 1))
-
+      block_size = 256
 
       # hierarchy
       bvh:BVH = BVH.init(num_elems + num_elems - 1, device=self.device)
 
-      module.hierarchy(g_num_elements=num_elems, ele_primitiveIdx=prim_idx, ele_aabb=ele_aabb,
-                          g_sorted_morton_codes=morton_codes, 
+      module.hierarchy(num_elements=num_elems, ele_primitive_idx=prim_idx, ele_aabb=ele_aabb,
+                          sorted_codes=morton_codes, 
                           bvh_info=bvh.info, 
                           bvh_aabb=bvh.aabb, 
                           bvh_construction_infos=bvh.construction_info
-        ).launchRaw(blockSize=(256, 1, 1), gridSize=(round_up(num_elems, 256), 1, 1))
+        ).launchRaw(blockSize=(block_size, 1, 1), gridSize=(round_up(num_elems, block_size), 1, 1))
       torch.cuda.synchronize()
 
 
-      # bounding_boxes
-      tree_heights = torch.zeros((num_elems, 1), dtype=torch.int, device=self.device)
-      module.get_bvh_height(g_num_elements=num_elems, 
-                                 bvh_info=bvh.info,
-                                 bvh_aabb=bvh.aabb, 
-                                 bvh_construction_infos=bvh.construction_info, 
-                                 tree_heights=tree_heights
-        ).launchRaw(blockSize=(256, 1, 1), gridSize=(round_up(num_elems, 256), 1, 1))
+
+      module.bounding_boxes(num_elements=num_elems,
+                     bvh_info=bvh.info,
+                     bvh_aabb=bvh.aabb,
+                     bvh_construction_infos=bvh.construction_info
+        ).launchRaw(blockSize=(block_size, 1, 1), gridSize=(round_up(num_elems, block_size), 1, 1))
 
 
-      tree_height_max = tree_heights.max()
-      for i in range(tree_height_max):
-          module.get_bbox(g_num_elements=num_elems, 
-                              expected_height=int(i+1),
-                              bvh_info=bvh.info, 
-                              bvh_aabb=bvh.aabb, 
-                              bvh_construction_infos=bvh.construction_info
-              ).launchRaw(blockSize=(256, 1, 1), gridSize=(round_up(num_elems, 256), 1, 1))
-
-
-      module.set_root(bvh_info=bvh.info, bvh_aabb=bvh.aabb
-        ).launchRaw(blockSize=(1, 1, 1), gridSize=(1, 1, 1)) 
-      
 
       return MeshBVH(mesh, bvh)

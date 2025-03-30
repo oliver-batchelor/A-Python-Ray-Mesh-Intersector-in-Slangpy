@@ -14,10 +14,9 @@ def generate_rays(width, height, device:torch.device):
   z = -torch.ones_like(x)
 
   ray_directions = torch.stack([x, y, z], dim=-1)
-  ray_origins = torch.tensor([-0.025, 0.05, 0.125], device=device).broadcast_to(ray_directions.shape)
+  ray_origins = torch.tensor([-0.025, 4.05, 6.325], device=device).broadcast_to(ray_directions.shape)
 
-  ray_origins = ray_origins.reshape(-1,3)
-  ray_directions = F.normalize(ray_directions.reshape(-1,3))
+  ray_directions = F.normalize(ray_directions, dim=-1)
 
   return ray_origins.contiguous(), ray_directions.contiguous()
 
@@ -43,11 +42,12 @@ def main():
   start_time = time.time()
   bvh:MeshBVH = builder.build(mesh)
 
+  torch.cuda.synchronize()
+
   end_time = time.time()
   elapsed_time = end_time - start_time
   print(f"GPU bvh build finished in: {elapsed_time} s")
 
-  print("bvh build over!")
   image_size = (800, 800)
   ray_origins, ray_directions = generate_rays(image_size[0], image_size[1], device=args.device)
 
@@ -57,11 +57,13 @@ def main():
   hit_t, hit_idx = bvh.intersect(ray_origins, ray_directions)
   end_time = time.time()
 
+
+  torch.cuda.synchronize()
+
   elapsed_time = end_time - start_time
   print("ray query time:", elapsed_time, "s")
 
   mask = hit_idx >= 0
-  print(mask.sum())
   
   hit_pos = torch.zeros_like(ray_origins)
   hit_pos[mask] = ray_origins[mask] + ray_directions[mask] * hit_t[mask].unsqueeze(-1)
