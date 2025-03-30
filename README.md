@@ -1,12 +1,12 @@
-# A Python Ray-Mesh Intersector in Slangpy 
+# A Python Ray-Mesh Intersector in slangtorch 
 
 this is a GPU LBVH builder implemented in [slang-torch](https://github.com/shader-slang/slang-torch), based on [Vulkan LBVH (Linear Bounding Volume Hierarchy)](https://github.com/MircoWerner/VkLBVH)
 
-I build every step in slangpy, so you can get any buffers in the BVH building process, for example, you can get the information of the bvh trees, so you can query on them in your own kernel, or do anything to them.
+I build every step in slangtorch, so you can get any buffers in the BVH building process, for example, you can get the information of the bvh trees, so you can query on them in your own kernel, or do anything to them.
 ## Installation
 
 ```
-pip install torch, pyexr, slangpy, time, csv, numpy
+pip install torch, pyexr, slangtorch, time, csv, numpy
 ```
 
 ## Usage

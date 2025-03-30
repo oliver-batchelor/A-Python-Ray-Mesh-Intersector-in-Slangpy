@@ -1,40 +1,44 @@
 #define INVALID_POINTER 0x0
 
+// Utility functions at the top
+float3 loadFloat3(TensorView<float> tensor, int idx, int offset) {
+    return float3(
+        tensor[idx, offset + 0],
+        tensor[idx, offset + 1],
+        tensor[idx, offset + 2]
+    );
+}
+
+void storeFloat3(TensorView<float> tensor, int idx, int offset, float3 value) {
+    tensor[idx, offset + 0] = value.x;
+    tensor[idx, offset + 1] = value.y;
+    tensor[idx, offset + 2] = value.z;
+}
+
+void storeLBVHNode(int idx, int left, int right, uint primitiveIdx, float3 aabbMin, float3 aabbMax,
+                   TensorView<int> info, TensorView<float> aabb) {
+    info[idx, 0] = left;
+    info[idx, 1] = right;
+    info[idx, 2] = int(primitiveIdx);
+    storeFloat3(aabb, idx, 0, aabbMin);
+    storeFloat3(aabb, idx, 3, aabbMax);
+}
+
 struct Element {
-    uint primitiveIdx; // the id of the primitive; this primitive id is copied to the leaf nodes of the  LBVHNode
-    float aabbMinX;    // aabb of the primitive
-    float aabbMinY;
-    float aabbMinZ;
-    float aabbMaxX;
-    float aabbMaxY;
-    float aabbMaxZ;
+    uint primitiveIdx;
+    float3 aabbMin;
+    float3 aabbMax;
 };
 
-// output of the builder; it is necessary to allocate the (empty) buffer
-struct LBVHNode {
-    int left;          // pointer to the left child or INVALID_POINTER in case of leaf
-    int right;         // pointer to the right child or INVALID_POINTER in case of leaf
-    uint primitiveIdx; // custom value that is copied from the input Element or 0 in case of inner node
-    float aabbMinX;    // aabb of the node
-    float aabbMinY;
-    float aabbMinZ;
-    float aabbMaxX;
-    float aabbMaxY;
-    float aabbMaxZ;
-};
+
 
 struct LBVHConstructionInfo {
     uint parent;         // pointer to the parent
     int visitationCount; // number of threads that arrived
 };
 
-int findMSB(uint val) {
-    if (val == 0) return -1;
-    int msb = 31; // 32 uint
-    while (!bool((val >> msb) & 1)) {
-        msb--;
-    }
-    return msb;
+int clz(uint) {
+  __intrinsic_asm R"(__clz($0))";
 }
 
 int delta(int i, uint codeI, int j, uint g_num_elements, TensorView<int> g_sorted_morton_codes) {
@@ -47,14 +51,14 @@ int delta(int i, uint codeI, int j, uint g_num_elements, TensorView<int> g_sorte
         uint elementIdxI = i;// g_sorted_morton_codes[i].elementIdx;
         uint elementIdxJ = j;// g_sorted_morton_codes[j].elementIdx;
         // add 32 for common prefix of codeI ^ codeJ
-        return 32 + 31 - findMSB(elementIdxI ^ elementIdxJ);
+        return 32 + clz(elementIdxI ^ elementIdxJ);
     }
-    return 31 - findMSB(codeI ^ codeJ);
+    return clz(codeI ^ codeJ);
 }
 
 void determineRange(int idx, out int lower, out int upper, uint g_num_elements, TensorView<int> g_sorted_morton_codes) {
     // determine direction of the range (+1 or -1)
-    const uint code = g_sorted_morton_codes[idx, 0];
+    const uint code = g_sorted_morton_codes[idx];
     const int deltaL = delta(idx, code, idx - 1, g_num_elements, g_sorted_morton_codes);
     const int deltaR = delta(idx, code, idx + 1, g_num_elements, g_sorted_morton_codes);
     const int d = (deltaR >= deltaL) ? 1 : -1;
@@ -108,138 +112,54 @@ int findSplit(int first, int last, uint g_num_elements, TensorView<int> g_sorted
 
 [AutoPyBindCUDA]
 [CUDAKernel]
-void hierarchy(uint g_num_elements, TensorView<int> ele_primitiveIdx, TensorView<float> ele_aabb,
-               TensorView<int> g_sorted_morton_codes, TensorView<int> g_lbvh_info, TensorView<float> g_lbvh_aabb,
-               TensorView<int> g_lbvh_construction_infos)
+void hierarchy(uint g_num_elements, 
+  
+               TensorView<int> ele_primitiveIdx,
+               TensorView<float> ele_aabb,
+               TensorView<int> g_sorted_morton_codes, TensorView<int> bvh_info, TensorView<float> bvh_aabb,
+               TensorView<int> bvh_construction_infos)
 {
     uint3 dispatchIdx = cudaThreadIdx() + cudaBlockIdx() * cudaBlockDim();
     uint gID = dispatchIdx.x;
     if (gID >= g_num_elements) return;
-    uint g_absolute_pointers = 1;
     const int LEAF_OFFSET = int(g_num_elements) - 1;
+
     // construct leaf nodes
     if (gID < g_num_elements) {
-        Element element;
-        element.primitiveIdx = ele_primitiveIdx[g_sorted_morton_codes[gID, 1], 0];
-        element.aabbMinX = ele_aabb[g_sorted_morton_codes[gID, 1], 0];
-        element.aabbMinY = ele_aabb[g_sorted_morton_codes[gID, 1], 1];
-        element.aabbMinZ = ele_aabb[g_sorted_morton_codes[gID, 1], 2];
+        int sortedIdx = g_sorted_morton_codes[gID, 1];
+        float3 aabbMin = loadFloat3(ele_aabb, sortedIdx, 0);
+        float3 aabbMax = loadFloat3(ele_aabb, sortedIdx, 3);
+        uint primitiveIdx = ele_primitiveIdx[sortedIdx, 0];
 
-        element.aabbMaxX = ele_aabb[g_sorted_morton_codes[gID, 1], 3];
-        element.aabbMaxY = ele_aabb[g_sorted_morton_codes[gID, 1], 4];
-        element.aabbMaxZ = ele_aabb[g_sorted_morton_codes[gID, 1], 5];
-
-        LBVHNode lbvhNode;
-        lbvhNode.left = INVALID_POINTER;
-        lbvhNode.right = INVALID_POINTER;
-        lbvhNode.primitiveIdx = element.primitiveIdx;
-        lbvhNode.aabbMinX = element.aabbMinX;
-        lbvhNode.aabbMinY = element.aabbMinY;
-        lbvhNode.aabbMinZ = element.aabbMinZ;
-        lbvhNode.aabbMaxX = element.aabbMaxX;
-        lbvhNode.aabbMaxY = element.aabbMaxY;
-        lbvhNode.aabbMaxZ = element.aabbMaxZ;
-        g_lbvh_info[LEAF_OFFSET + gID, 0] = lbvhNode.left;
-        g_lbvh_info[LEAF_OFFSET + gID, 1] = lbvhNode.right;
-        g_lbvh_info[LEAF_OFFSET + gID, 2] = int(lbvhNode.primitiveIdx);
-
-        g_lbvh_aabb[LEAF_OFFSET + gID, 0] = lbvhNode.aabbMinX;
-        g_lbvh_aabb[LEAF_OFFSET + gID, 1] = lbvhNode.aabbMinY;
-        g_lbvh_aabb[LEAF_OFFSET + gID, 2] = lbvhNode.aabbMinZ;
-        g_lbvh_aabb[LEAF_OFFSET + gID, 3] = lbvhNode.aabbMaxX;
-        g_lbvh_aabb[LEAF_OFFSET + gID, 4] = lbvhNode.aabbMaxY;
-        g_lbvh_aabb[LEAF_OFFSET + gID, 5] = lbvhNode.aabbMaxZ;
+        
+        storeLBVHNode(LEAF_OFFSET + gID, INVALID_POINTER, INVALID_POINTER, 
+                     primitiveIdx, aabbMin, aabbMax, bvh_info, bvh_aabb);
     }
 
     // construct internal nodes
     if (gID < g_num_elements - 1) {
-        // Find out which range of objects the node corresponds to.
-        // (This is where the magic happens!)
-        int first;
-        int last;
+        int first, last;
         determineRange(int(gID), first, last, g_num_elements, g_sorted_morton_codes);
-
-        // determine where to split the range
         int split = findSplit(first, last, g_num_elements, g_sorted_morton_codes);
 
-        // select childA
-        int childA = -1;
-        if (split == first) {
-            childA = LEAF_OFFSET + split; // pointer to leaf node
-        } else {
-            childA = split; // pointer to internal node
-        }
+        int childA = (split == first) ? LEAF_OFFSET + split : split;
+        int childB = (split + 1 == last) ? LEAF_OFFSET + split + 1 : split + 1;
 
-        // select childB
-        int childB = -1;
-        if (split + 1 == last) {
-            childB = LEAF_OFFSET + split + 1; // pointer to leaf node
-        } else {
-            childB = split + 1; // pointer to internal node
-        }
+        float3 aabbMin = float3(1e9);
+        float3 aabbMax = float3(-1e9);
+        
+        storeLBVHNode(gID, childA, childB, -1, aabbMin, aabbMax, bvh_info, bvh_aabb);
 
-        // record parent-child relationships
-        if (g_absolute_pointers != 0) {
-            LBVHNode lbvhNode;
-            lbvhNode.left = childA;
-            lbvhNode.right = childB;
-            lbvhNode.primitiveIdx = 0;
-            lbvhNode.aabbMinX = 1e9;
-            lbvhNode.aabbMinY = 1e9;
-            lbvhNode.aabbMinZ = 1e9;
-            lbvhNode.aabbMaxX = -1e9;
-            lbvhNode.aabbMaxY = -1e9;
-            lbvhNode.aabbMaxZ = -1e9;
-            g_lbvh_info[gID, 0] = lbvhNode.left;
-            g_lbvh_info[gID, 1] = lbvhNode.right;
-            g_lbvh_info[gID, 2] = int(lbvhNode.primitiveIdx);
-
-            g_lbvh_aabb[gID, 0] = lbvhNode.aabbMinX;
-            g_lbvh_aabb[gID, 1] = lbvhNode.aabbMinY;
-            g_lbvh_aabb[gID, 2] = lbvhNode.aabbMinZ;
-            g_lbvh_aabb[gID, 3] = lbvhNode.aabbMaxX;
-            g_lbvh_aabb[gID, 4] = lbvhNode.aabbMaxY;
-            g_lbvh_aabb[gID, 5] = lbvhNode.aabbMaxZ;
-        } else {
-            LBVHNode lbvhNode;
-            lbvhNode.left = childA - int(gID);
-            lbvhNode.right = childB - int(gID);
-            lbvhNode.primitiveIdx = 0;
-            lbvhNode.aabbMinX = 1e9;
-            lbvhNode.aabbMinY = 1e9;
-            lbvhNode.aabbMinZ = 1e9;
-            lbvhNode.aabbMaxX = -1e9;
-            lbvhNode.aabbMaxY = -1e9;
-            lbvhNode.aabbMaxZ = -1e9;
-            g_lbvh_info[gID, 0] = lbvhNode.left;
-            g_lbvh_info[gID, 1] = lbvhNode.right;
-            g_lbvh_info[gID, 2] = int(lbvhNode.primitiveIdx);
-
-            g_lbvh_aabb[gID, 0] = lbvhNode.aabbMinX;
-            g_lbvh_aabb[gID, 1] = lbvhNode.aabbMinY;
-            g_lbvh_aabb[gID, 2] = lbvhNode.aabbMinZ;
-            g_lbvh_aabb[gID, 3] = lbvhNode.aabbMaxX;
-            g_lbvh_aabb[gID, 4] = lbvhNode.aabbMaxY;
-            g_lbvh_aabb[gID, 5] = lbvhNode.aabbMaxZ;
-        }
-        LBVHConstructionInfo bvh_con_info;
-        bvh_con_info.parent = gID;
-        bvh_con_info.visitationCount = 0;
-
-        g_lbvh_construction_infos[childA, 0] = bvh_con_info.parent;
-        g_lbvh_construction_infos[childA, 1] = bvh_con_info.visitationCount;
-
-        g_lbvh_construction_infos[childB, 0] = bvh_con_info.parent;
-        g_lbvh_construction_infos[childB, 1] = bvh_con_info.visitationCount;
+        // Store construction info for children
+        bvh_construction_infos[childA, 0] = gID;
+        bvh_construction_infos[childA, 1] = 0;
+        bvh_construction_infos[childB, 0] = gID;
+        bvh_construction_infos[childB, 1] = 0;
     }
 
-    // node 0 is the root
+    // Set root node construction info
     if (gID == 0) {
-        LBVHConstructionInfo bvh_con_info;
-        bvh_con_info.parent = 0;
-        bvh_con_info.visitationCount = 0;
-
-        g_lbvh_construction_infos[0, 0] = bvh_con_info.parent;
-        g_lbvh_construction_infos[0, 1] = bvh_con_info.visitationCount;
+        bvh_construction_infos[0, 0] = 0;
+        bvh_construction_infos[0, 1] = 0;
     }
 }

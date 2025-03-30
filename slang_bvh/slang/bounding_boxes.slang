@@ -24,8 +24,8 @@ void aabbUnion(float3 minA, float3 maxA, float3 minB, float3 maxB, out float3 mi
 [AutoPyBindCUDA]
 [CUDAKernel]
 void bounding_boxes(uint g_num_elements,
-                TensorView<int> g_lbvh_info, TensorView<float> g_lbvh_aabb,
-               TensorView<int> g_lbvh_construction_infos)
+                TensorView<int> bvh_info, TensorView<float> bvh_aabb,
+               TensorView<int> bvh_construction_infos)
 {
     uint3 dispatchIdx = cudaThreadIdx() + cudaBlockIdx() * cudaBlockDim();
     uint gID = dispatchIdx.x;
@@ -33,71 +33,71 @@ void bounding_boxes(uint g_num_elements,
     uint g_absolute_pointers = 1;
     const int LEAF_OFFSET = int(g_num_elements) - 1;
 
-    uint nodeIdx = g_lbvh_construction_infos[LEAF_OFFSET + gID, 0];
+    uint nodeIdx = bvh_construction_infos[LEAF_OFFSET + gID, 0];
     while (true) {
         int visitations;
-        g_lbvh_construction_infos.InterlockedAdd(uint2(nodeIdx, 1), 1, visitations);
+        bvh_construction_infos.InterlockedAdd(uint2(nodeIdx, 1), 1, visitations);
         if (visitations < 1) {
             // this is the first thread that arrived at this node -> finished
             break;
         }
         // this is the second thread that arrived at this node, both children are computed -> compute aabb union and continue
         LBVHNode bvhNode;
-        bvhNode.left = g_lbvh_info[nodeIdx, 0];
-        bvhNode.right = g_lbvh_info[nodeIdx, 1];
-        bvhNode.primitiveIdx = g_lbvh_info[nodeIdx, 2];
-        bvhNode.aabbMinX = g_lbvh_aabb[nodeIdx, 0];
-        bvhNode.aabbMinY = g_lbvh_aabb[nodeIdx, 1];
-        bvhNode.aabbMinZ = g_lbvh_aabb[nodeIdx, 2];
-        bvhNode.aabbMaxX = g_lbvh_aabb[nodeIdx, 3];
-        bvhNode.aabbMaxY = g_lbvh_aabb[nodeIdx, 4];
-        bvhNode.aabbMaxZ = g_lbvh_aabb[nodeIdx, 5];
+        bvhNode.left = bvh_info[nodeIdx, 0];
+        bvhNode.right = bvh_info[nodeIdx, 1];
+        bvhNode.primitiveIdx = bvh_info[nodeIdx, 2];
+        bvhNode.aabbMinX = bvh_aabb[nodeIdx, 0];
+        bvhNode.aabbMinY = bvh_aabb[nodeIdx, 1];
+        bvhNode.aabbMinZ = bvh_aabb[nodeIdx, 2];
+        bvhNode.aabbMaxX = bvh_aabb[nodeIdx, 3];
+        bvhNode.aabbMaxY = bvh_aabb[nodeIdx, 4];
+        bvhNode.aabbMaxZ = bvh_aabb[nodeIdx, 5];
 
         LBVHNode bvhNodeChildA;
         LBVHNode bvhNodeChildB;
         if (g_absolute_pointers != 0) {
 
-            bvhNodeChildA.left = g_lbvh_info[bvhNode.left, 0];
-            bvhNodeChildA.right = g_lbvh_info[bvhNode.left, 1];
-            bvhNodeChildA.primitiveIdx = g_lbvh_info[bvhNode.left, 2];
-            bvhNodeChildA.aabbMinX = g_lbvh_aabb[bvhNode.left, 0];
-            bvhNodeChildA.aabbMinY = g_lbvh_aabb[bvhNode.left, 1];
-            bvhNodeChildA.aabbMinZ = g_lbvh_aabb[bvhNode.left, 2];
-            bvhNodeChildA.aabbMaxX = g_lbvh_aabb[bvhNode.left, 3];
-            bvhNodeChildA.aabbMaxY = g_lbvh_aabb[bvhNode.left, 4];
-            bvhNodeChildA.aabbMaxZ = g_lbvh_aabb[bvhNode.left, 5];
+            bvhNodeChildA.left = bvh_info[bvhNode.left, 0];
+            bvhNodeChildA.right = bvh_info[bvhNode.left, 1];
+            bvhNodeChildA.primitiveIdx = bvh_info[bvhNode.left, 2];
+            bvhNodeChildA.aabbMinX = bvh_aabb[bvhNode.left, 0];
+            bvhNodeChildA.aabbMinY = bvh_aabb[bvhNode.left, 1];
+            bvhNodeChildA.aabbMinZ = bvh_aabb[bvhNode.left, 2];
+            bvhNodeChildA.aabbMaxX = bvh_aabb[bvhNode.left, 3];
+            bvhNodeChildA.aabbMaxY = bvh_aabb[bvhNode.left, 4];
+            bvhNodeChildA.aabbMaxZ = bvh_aabb[bvhNode.left, 5];
 
-            bvhNodeChildB.left = g_lbvh_info[bvhNode.right, 0];
-            bvhNodeChildB.right = g_lbvh_info[bvhNode.right, 1];
-            bvhNodeChildB.primitiveIdx = g_lbvh_info[bvhNode.right, 2];
-            bvhNodeChildB.aabbMinX = g_lbvh_aabb[bvhNode.right, 0];
-            bvhNodeChildB.aabbMinY = g_lbvh_aabb[bvhNode.right, 1];
-            bvhNodeChildB.aabbMinZ = g_lbvh_aabb[bvhNode.right, 2];
-            bvhNodeChildB.aabbMaxX = g_lbvh_aabb[bvhNode.right, 3];
-            bvhNodeChildB.aabbMaxY = g_lbvh_aabb[bvhNode.right, 4];
-            bvhNodeChildB.aabbMaxZ = g_lbvh_aabb[bvhNode.right, 5];
+            bvhNodeChildB.left = bvh_info[bvhNode.right, 0];
+            bvhNodeChildB.right = bvh_info[bvhNode.right, 1];
+            bvhNodeChildB.primitiveIdx = bvh_info[bvhNode.right, 2];
+            bvhNodeChildB.aabbMinX = bvh_aabb[bvhNode.right, 0];
+            bvhNodeChildB.aabbMinY = bvh_aabb[bvhNode.right, 1];
+            bvhNodeChildB.aabbMinZ = bvh_aabb[bvhNode.right, 2];
+            bvhNodeChildB.aabbMaxX = bvh_aabb[bvhNode.right, 3];
+            bvhNodeChildB.aabbMaxY = bvh_aabb[bvhNode.right, 4];
+            bvhNodeChildB.aabbMaxZ = bvh_aabb[bvhNode.right, 5];
 
         } else {
 
-            bvhNodeChildA.left = g_lbvh_info[nodeIdx + bvhNode.left, 0];
-            bvhNodeChildA.right = g_lbvh_info[nodeIdx + bvhNode.left, 1];
-            bvhNodeChildA.primitiveIdx = g_lbvh_info[nodeIdx + bvhNode.left, 2];
-            bvhNodeChildA.aabbMinX = g_lbvh_aabb[nodeIdx + bvhNode.left, 0];
-            bvhNodeChildA.aabbMinY = g_lbvh_aabb[nodeIdx + bvhNode.left, 1];
-            bvhNodeChildA.aabbMinZ = g_lbvh_aabb[nodeIdx + bvhNode.left, 2];
-            bvhNodeChildA.aabbMaxX = g_lbvh_aabb[nodeIdx + bvhNode.left, 3];
-            bvhNodeChildA.aabbMaxY = g_lbvh_aabb[nodeIdx + bvhNode.left, 4];
-            bvhNodeChildA.aabbMaxZ = g_lbvh_aabb[nodeIdx + bvhNode.left, 5];
+            bvhNodeChildA.left = bvh_info[nodeIdx + bvhNode.left, 0];
+            bvhNodeChildA.right = bvh_info[nodeIdx + bvhNode.left, 1];
+            bvhNodeChildA.primitiveIdx = bvh_info[nodeIdx + bvhNode.left, 2];
+            bvhNodeChildA.aabbMinX = bvh_aabb[nodeIdx + bvhNode.left, 0];
+            bvhNodeChildA.aabbMinY = bvh_aabb[nodeIdx + bvhNode.left, 1];
+            bvhNodeChildA.aabbMinZ = bvh_aabb[nodeIdx + bvhNode.left, 2];
+            bvhNodeChildA.aabbMaxX = bvh_aabb[nodeIdx + bvhNode.left, 3];
+            bvhNodeChildA.aabbMaxY = bvh_aabb[nodeIdx + bvhNode.left, 4];
+            bvhNodeChildA.aabbMaxZ = bvh_aabb[nodeIdx + bvhNode.left, 5];
 
-            bvhNodeChildB.left = g_lbvh_info[nodeIdx + bvhNode.right, 0];
-            bvhNodeChildB.right = g_lbvh_info[nodeIdx + bvhNode.right, 1];
-            bvhNodeChildB.primitiveIdx = g_lbvh_info[nodeIdx + bvhNode.right, 2];
-            bvhNodeChildB.aabbMinX = g_lbvh_aabb[nodeIdx + bvhNode.right, 0];
-            bvhNodeChildB.aabbMinY = g_lbvh_aabb[nodeIdx + bvhNode.right, 1];
-            bvhNodeChildB.aabbMinZ = g_lbvh_aabb[nodeIdx + bvhNode.right, 2];
-            bvhNodeChildB.aabbMaxX = g_lbvh_aabb[nodeIdx + bvhNode.right, 3];
-            bvhNodeChildB.aabbMaxY = g_lbvh_aabb[nodeIdx + bvhNode.right, 4];
-            bvhNodeChildB.aabbMaxZ = g_lbvh_aabb[nodeIdx + bvhNode.right, 5];
+            bvhNodeChildB.left = bvh_info[nodeIdx + bvhNode.right, 0];
+            bvhNodeChildB.right = bvh_info[nodeIdx + bvhNode.right, 1];
+            bvhNodeChildB.primitiveIdx = bvh_info[nodeIdx + bvhNode.right, 2];
+            bvhNodeChildB.aabbMinX = bvh_aabb[nodeIdx + bvhNode.right, 0];
+            bvhNodeChildB.aabbMinY = bvh_aabb[nodeIdx + bvhNode.right, 1];
+            bvhNodeChildB.aabbMinZ = bvh_aabb[nodeIdx + bvhNode.right, 2];
+            bvhNodeChildB.aabbMaxX = bvh_aabb[nodeIdx + bvhNode.right, 3];
+            bvhNodeChildB.aabbMaxY = bvh_aabb[nodeIdx + bvhNode.right, 4];
+            bvhNodeChildB.aabbMaxZ = bvh_aabb[nodeIdx + bvhNode.right, 5];
         }
 
         float3 minA = float3(bvhNodeChildA.aabbMinX, bvhNodeChildA.aabbMinY, bvhNodeChildA.aabbMinZ);
@@ -127,21 +127,21 @@ void bounding_boxes(uint g_num_elements,
         bvhNode.aabbMaxY = maxAABB.y;
         bvhNode.aabbMaxZ = maxAABB.z;
 
-        g_lbvh_info[nodeIdx, 0] = bvhNode.left;
-        g_lbvh_info[nodeIdx, 1] = bvhNode.right;
-        g_lbvh_info[nodeIdx, 2] = int(bvhNode.primitiveIdx);
+        bvh_info[nodeIdx, 0] = bvhNode.left;
+        bvh_info[nodeIdx, 1] = bvhNode.right;
+        bvh_info[nodeIdx, 2] = int(bvhNode.primitiveIdx);
 
-        g_lbvh_aabb[nodeIdx, 0] = bvhNode.aabbMinX;
-        g_lbvh_aabb[nodeIdx, 1] = bvhNode.aabbMinY;
-        g_lbvh_aabb[nodeIdx, 2] = bvhNode.aabbMinZ;
-        g_lbvh_aabb[nodeIdx, 3] = bvhNode.aabbMaxX;
-        g_lbvh_aabb[nodeIdx, 4] = bvhNode.aabbMaxY;
-        g_lbvh_aabb[nodeIdx, 5] = bvhNode.aabbMaxZ;
+        bvh_aabb[nodeIdx, 0] = bvhNode.aabbMinX;
+        bvh_aabb[nodeIdx, 1] = bvhNode.aabbMinY;
+        bvh_aabb[nodeIdx, 2] = bvhNode.aabbMinZ;
+        bvh_aabb[nodeIdx, 3] = bvhNode.aabbMaxX;
+        bvh_aabb[nodeIdx, 4] = bvhNode.aabbMaxY;
+        bvh_aabb[nodeIdx, 5] = bvhNode.aabbMaxZ;
 
         if (nodeIdx == 0) {
             break;
         }
-        nodeIdx = g_lbvh_construction_infos[nodeIdx, 0];
+        nodeIdx = bvh_construction_infos[nodeIdx, 0];
     }
     
 }
@@ -149,8 +149,8 @@ void bounding_boxes(uint g_num_elements,
 [AutoPyBindCUDA]
 [CUDAKernel]
 void get_bvh_height(uint g_num_elements,
-                    TensorView<int> g_lbvh_info, TensorView<float> g_lbvh_aabb,
-                    TensorView<int> g_lbvh_construction_infos, TensorView<int> tree_heights)
+                    TensorView<int> bvh_info, TensorView<float> bvh_aabb,
+                    TensorView<int> bvh_construction_infos, TensorView<int> tree_heights)
 {
     uint3 dispatchIdx = cudaThreadIdx() + cudaBlockIdx() * cudaBlockDim();
     uint gID = dispatchIdx.x;
@@ -158,14 +158,14 @@ void get_bvh_height(uint g_num_elements,
     uint g_absolute_pointers = 1;
     const int LEAF_OFFSET = int(g_num_elements) - 1;
 
-    uint nodeIdx = g_lbvh_construction_infos[LEAF_OFFSET + gID, 0];
+    uint nodeIdx = bvh_construction_infos[LEAF_OFFSET + gID, 0];
     int height = 0;
     while (true) {
         if (nodeIdx == 0) {
             break;
         }
         height++;
-        nodeIdx = g_lbvh_construction_infos[nodeIdx, 0];
+        nodeIdx = bvh_construction_infos[nodeIdx, 0];
     }
     tree_heights[gID] = height;
 }
@@ -173,8 +173,8 @@ void get_bvh_height(uint g_num_elements,
 [AutoPyBindCUDA]
 [CUDAKernel]
 void get_bbox(uint g_num_elements, int expected_height,
-                    TensorView<int> g_lbvh_info, TensorView<float> g_lbvh_aabb,
-                    TensorView<int> g_lbvh_construction_infos)
+                    TensorView<int> bvh_info, TensorView<float> bvh_aabb,
+                    TensorView<int> bvh_construction_infos)
 {
     uint3 dispatchIdx = cudaThreadIdx() + cudaBlockIdx() * cudaBlockDim();
     uint gID = dispatchIdx.x;
@@ -182,7 +182,7 @@ void get_bbox(uint g_num_elements, int expected_height,
     uint g_absolute_pointers = 1;
     const int LEAF_OFFSET = int(g_num_elements) - 1;
 
-    uint nodeIdx = g_lbvh_construction_infos[LEAF_OFFSET + gID, 0];
+    uint nodeIdx = bvh_construction_infos[LEAF_OFFSET + gID, 0];
     int height = 0;
     while (true) {
         if (nodeIdx == 0) {
@@ -194,60 +194,60 @@ void get_bbox(uint g_num_elements, int expected_height,
         if (height == expected_height)
         {  
             LBVHNode bvhNode;
-            bvhNode.left = g_lbvh_info[nodeIdx, 0];
-            bvhNode.right = g_lbvh_info[nodeIdx, 1];
-            bvhNode.primitiveIdx = g_lbvh_info[nodeIdx, 2];
-            bvhNode.aabbMinX = g_lbvh_aabb[nodeIdx, 0];
-            bvhNode.aabbMinY = g_lbvh_aabb[nodeIdx, 1];
-            bvhNode.aabbMinZ = g_lbvh_aabb[nodeIdx, 2];
-            bvhNode.aabbMaxX = g_lbvh_aabb[nodeIdx, 3];
-            bvhNode.aabbMaxY = g_lbvh_aabb[nodeIdx, 4];
-            bvhNode.aabbMaxZ = g_lbvh_aabb[nodeIdx, 5];
+            bvhNode.left = bvh_info[nodeIdx, 0];
+            bvhNode.right = bvh_info[nodeIdx, 1];
+            bvhNode.primitiveIdx = bvh_info[nodeIdx, 2];
+            bvhNode.aabbMinX = bvh_aabb[nodeIdx, 0];
+            bvhNode.aabbMinY = bvh_aabb[nodeIdx, 1];
+            bvhNode.aabbMinZ = bvh_aabb[nodeIdx, 2];
+            bvhNode.aabbMaxX = bvh_aabb[nodeIdx, 3];
+            bvhNode.aabbMaxY = bvh_aabb[nodeIdx, 4];
+            bvhNode.aabbMaxZ = bvh_aabb[nodeIdx, 5];
 
             LBVHNode bvhNodeChildA;
             LBVHNode bvhNodeChildB;
             if (g_absolute_pointers != 0) {
 
-                bvhNodeChildA.left = g_lbvh_info[bvhNode.left, 0];
-                bvhNodeChildA.right = g_lbvh_info[bvhNode.left, 1];
-                bvhNodeChildA.primitiveIdx = g_lbvh_info[bvhNode.left, 2];
-                bvhNodeChildA.aabbMinX = g_lbvh_aabb[bvhNode.left, 0];
-                bvhNodeChildA.aabbMinY = g_lbvh_aabb[bvhNode.left, 1];
-                bvhNodeChildA.aabbMinZ = g_lbvh_aabb[bvhNode.left, 2];
-                bvhNodeChildA.aabbMaxX = g_lbvh_aabb[bvhNode.left, 3];
-                bvhNodeChildA.aabbMaxY = g_lbvh_aabb[bvhNode.left, 4];
-                bvhNodeChildA.aabbMaxZ = g_lbvh_aabb[bvhNode.left, 5];
+                bvhNodeChildA.left = bvh_info[bvhNode.left, 0];
+                bvhNodeChildA.right = bvh_info[bvhNode.left, 1];
+                bvhNodeChildA.primitiveIdx = bvh_info[bvhNode.left, 2];
+                bvhNodeChildA.aabbMinX = bvh_aabb[bvhNode.left, 0];
+                bvhNodeChildA.aabbMinY = bvh_aabb[bvhNode.left, 1];
+                bvhNodeChildA.aabbMinZ = bvh_aabb[bvhNode.left, 2];
+                bvhNodeChildA.aabbMaxX = bvh_aabb[bvhNode.left, 3];
+                bvhNodeChildA.aabbMaxY = bvh_aabb[bvhNode.left, 4];
+                bvhNodeChildA.aabbMaxZ = bvh_aabb[bvhNode.left, 5];
 
-                bvhNodeChildB.left = g_lbvh_info[bvhNode.right, 0];
-                bvhNodeChildB.right = g_lbvh_info[bvhNode.right, 1];
-                bvhNodeChildB.primitiveIdx = g_lbvh_info[bvhNode.right, 2];
-                bvhNodeChildB.aabbMinX = g_lbvh_aabb[bvhNode.right, 0];
-                bvhNodeChildB.aabbMinY = g_lbvh_aabb[bvhNode.right, 1];
-                bvhNodeChildB.aabbMinZ = g_lbvh_aabb[bvhNode.right, 2];
-                bvhNodeChildB.aabbMaxX = g_lbvh_aabb[bvhNode.right, 3];
-                bvhNodeChildB.aabbMaxY = g_lbvh_aabb[bvhNode.right, 4];
-                bvhNodeChildB.aabbMaxZ = g_lbvh_aabb[bvhNode.right, 5];
+                bvhNodeChildB.left = bvh_info[bvhNode.right, 0];
+                bvhNodeChildB.right = bvh_info[bvhNode.right, 1];
+                bvhNodeChildB.primitiveIdx = bvh_info[bvhNode.right, 2];
+                bvhNodeChildB.aabbMinX = bvh_aabb[bvhNode.right, 0];
+                bvhNodeChildB.aabbMinY = bvh_aabb[bvhNode.right, 1];
+                bvhNodeChildB.aabbMinZ = bvh_aabb[bvhNode.right, 2];
+                bvhNodeChildB.aabbMaxX = bvh_aabb[bvhNode.right, 3];
+                bvhNodeChildB.aabbMaxY = bvh_aabb[bvhNode.right, 4];
+                bvhNodeChildB.aabbMaxZ = bvh_aabb[bvhNode.right, 5];
             } else {
 
-                bvhNodeChildA.left = g_lbvh_info[nodeIdx + bvhNode.left, 0];
-                bvhNodeChildA.right = g_lbvh_info[nodeIdx + bvhNode.left, 1];
-                bvhNodeChildA.primitiveIdx = g_lbvh_info[nodeIdx + bvhNode.left, 2];
-                bvhNodeChildA.aabbMinX = g_lbvh_aabb[nodeIdx + bvhNode.left, 0];
-                bvhNodeChildA.aabbMinY = g_lbvh_aabb[nodeIdx + bvhNode.left, 1];
-                bvhNodeChildA.aabbMinZ = g_lbvh_aabb[nodeIdx + bvhNode.left, 2];
-                bvhNodeChildA.aabbMaxX = g_lbvh_aabb[nodeIdx + bvhNode.left, 3];
-                bvhNodeChildA.aabbMaxY = g_lbvh_aabb[nodeIdx + bvhNode.left, 4];
-                bvhNodeChildA.aabbMaxZ = g_lbvh_aabb[nodeIdx + bvhNode.left, 5];
+                bvhNodeChildA.left = bvh_info[nodeIdx + bvhNode.left, 0];
+                bvhNodeChildA.right = bvh_info[nodeIdx + bvhNode.left, 1];
+                bvhNodeChildA.primitiveIdx = bvh_info[nodeIdx + bvhNode.left, 2];
+                bvhNodeChildA.aabbMinX = bvh_aabb[nodeIdx + bvhNode.left, 0];
+                bvhNodeChildA.aabbMinY = bvh_aabb[nodeIdx + bvhNode.left, 1];
+                bvhNodeChildA.aabbMinZ = bvh_aabb[nodeIdx + bvhNode.left, 2];
+                bvhNodeChildA.aabbMaxX = bvh_aabb[nodeIdx + bvhNode.left, 3];
+                bvhNodeChildA.aabbMaxY = bvh_aabb[nodeIdx + bvhNode.left, 4];
+                bvhNodeChildA.aabbMaxZ = bvh_aabb[nodeIdx + bvhNode.left, 5];
 
-                bvhNodeChildB.left = g_lbvh_info[nodeIdx + bvhNode.right, 0];
-                bvhNodeChildB.right = g_lbvh_info[nodeIdx + bvhNode.right, 1];
-                bvhNodeChildB.primitiveIdx = g_lbvh_info[nodeIdx + bvhNode.right, 2];
-                bvhNodeChildB.aabbMinX = g_lbvh_aabb[nodeIdx + bvhNode.right, 0];
-                bvhNodeChildB.aabbMinY = g_lbvh_aabb[nodeIdx + bvhNode.right, 1];
-                bvhNodeChildB.aabbMinZ = g_lbvh_aabb[nodeIdx + bvhNode.right, 2];
-                bvhNodeChildB.aabbMaxX = g_lbvh_aabb[nodeIdx + bvhNode.right, 3];
-                bvhNodeChildB.aabbMaxY = g_lbvh_aabb[nodeIdx + bvhNode.right, 4];
-                bvhNodeChildB.aabbMaxZ = g_lbvh_aabb[nodeIdx + bvhNode.right, 5];
+                bvhNodeChildB.left = bvh_info[nodeIdx + bvhNode.right, 0];
+                bvhNodeChildB.right = bvh_info[nodeIdx + bvhNode.right, 1];
+                bvhNodeChildB.primitiveIdx = bvh_info[nodeIdx + bvhNode.right, 2];
+                bvhNodeChildB.aabbMinX = bvh_aabb[nodeIdx + bvhNode.right, 0];
+                bvhNodeChildB.aabbMinY = bvh_aabb[nodeIdx + bvhNode.right, 1];
+                bvhNodeChildB.aabbMinZ = bvh_aabb[nodeIdx + bvhNode.right, 2];
+                bvhNodeChildB.aabbMaxX = bvh_aabb[nodeIdx + bvhNode.right, 3];
+                bvhNodeChildB.aabbMaxY = bvh_aabb[nodeIdx + bvhNode.right, 4];
+                bvhNodeChildB.aabbMaxZ = bvh_aabb[nodeIdx + bvhNode.right, 5];
             }
 
             float3 minA = float3(bvhNodeChildA.aabbMinX, bvhNodeChildA.aabbMinY, bvhNodeChildA.aabbMinZ);
@@ -277,88 +277,88 @@ void get_bbox(uint g_num_elements, int expected_height,
             bvhNode.aabbMaxY = maxAABB.y;
             bvhNode.aabbMaxZ = maxAABB.z;
 
-            g_lbvh_info[nodeIdx, 0] = bvhNode.left;
-            g_lbvh_info[nodeIdx, 1] = bvhNode.right;
-            g_lbvh_info[nodeIdx, 2] = int(bvhNode.primitiveIdx);
+            bvh_info[nodeIdx, 0] = bvhNode.left;
+            bvh_info[nodeIdx, 1] = bvhNode.right;
+            bvh_info[nodeIdx, 2] = int(bvhNode.primitiveIdx);
 
-            g_lbvh_aabb[nodeIdx, 0] = bvhNode.aabbMinX;
-            g_lbvh_aabb[nodeIdx, 1] = bvhNode.aabbMinY;
-            g_lbvh_aabb[nodeIdx, 2] = bvhNode.aabbMinZ;
-            g_lbvh_aabb[nodeIdx, 3] = bvhNode.aabbMaxX;
-            g_lbvh_aabb[nodeIdx, 4] = bvhNode.aabbMaxY;
-            g_lbvh_aabb[nodeIdx, 5] = bvhNode.aabbMaxZ;
+            bvh_aabb[nodeIdx, 0] = bvhNode.aabbMinX;
+            bvh_aabb[nodeIdx, 1] = bvhNode.aabbMinY;
+            bvh_aabb[nodeIdx, 2] = bvhNode.aabbMinZ;
+            bvh_aabb[nodeIdx, 3] = bvhNode.aabbMaxX;
+            bvh_aabb[nodeIdx, 4] = bvhNode.aabbMaxY;
+            bvh_aabb[nodeIdx, 5] = bvhNode.aabbMaxZ;
 
             break;
         }
 
-        nodeIdx = g_lbvh_construction_infos[nodeIdx, 0];
+        nodeIdx = bvh_construction_infos[nodeIdx, 0];
     }
 }
 
 [AutoPyBindCUDA]
 [CUDAKernel]
 void set_root(
-              TensorView<int> g_lbvh_info, TensorView<float> g_lbvh_aabb,
+              TensorView<int> bvh_info, TensorView<float> bvh_aabb,
               )
 {
     uint nodeIdx = 0;
     uint g_absolute_pointers = 0;
 
     LBVHNode bvhNode;
-    bvhNode.left = g_lbvh_info[nodeIdx, 0];
-    bvhNode.right = g_lbvh_info[nodeIdx, 1];
-    bvhNode.primitiveIdx = g_lbvh_info[nodeIdx, 2];
-    bvhNode.aabbMinX = g_lbvh_aabb[nodeIdx, 0];
-    bvhNode.aabbMinY = g_lbvh_aabb[nodeIdx, 1];
-    bvhNode.aabbMinZ = g_lbvh_aabb[nodeIdx, 2];
-    bvhNode.aabbMaxX = g_lbvh_aabb[nodeIdx, 3];
-    bvhNode.aabbMaxY = g_lbvh_aabb[nodeIdx, 4];
-    bvhNode.aabbMaxZ = g_lbvh_aabb[nodeIdx, 5];
+    bvhNode.left = bvh_info[nodeIdx, 0];
+    bvhNode.right = bvh_info[nodeIdx, 1];
+    bvhNode.primitiveIdx = bvh_info[nodeIdx, 2];
+    bvhNode.aabbMinX = bvh_aabb[nodeIdx, 0];
+    bvhNode.aabbMinY = bvh_aabb[nodeIdx, 1];
+    bvhNode.aabbMinZ = bvh_aabb[nodeIdx, 2];
+    bvhNode.aabbMaxX = bvh_aabb[nodeIdx, 3];
+    bvhNode.aabbMaxY = bvh_aabb[nodeIdx, 4];
+    bvhNode.aabbMaxZ = bvh_aabb[nodeIdx, 5];
 
     LBVHNode bvhNodeChildA;
     LBVHNode bvhNodeChildB;
     if (g_absolute_pointers != 0) {
 
-        bvhNodeChildA.left = g_lbvh_info[bvhNode.left, 0];
-        bvhNodeChildA.right = g_lbvh_info[bvhNode.left, 1];
-        bvhNodeChildA.primitiveIdx = g_lbvh_info[bvhNode.left, 2];
-        bvhNodeChildA.aabbMinX = g_lbvh_aabb[bvhNode.left, 0];
-        bvhNodeChildA.aabbMinY = g_lbvh_aabb[bvhNode.left, 1];
-        bvhNodeChildA.aabbMinZ = g_lbvh_aabb[bvhNode.left, 2];
-        bvhNodeChildA.aabbMaxX = g_lbvh_aabb[bvhNode.left, 3];
-        bvhNodeChildA.aabbMaxY = g_lbvh_aabb[bvhNode.left, 4];
-        bvhNodeChildA.aabbMaxZ = g_lbvh_aabb[bvhNode.left, 5];
+        bvhNodeChildA.left = bvh_info[bvhNode.left, 0];
+        bvhNodeChildA.right = bvh_info[bvhNode.left, 1];
+        bvhNodeChildA.primitiveIdx = bvh_info[bvhNode.left, 2];
+        bvhNodeChildA.aabbMinX = bvh_aabb[bvhNode.left, 0];
+        bvhNodeChildA.aabbMinY = bvh_aabb[bvhNode.left, 1];
+        bvhNodeChildA.aabbMinZ = bvh_aabb[bvhNode.left, 2];
+        bvhNodeChildA.aabbMaxX = bvh_aabb[bvhNode.left, 3];
+        bvhNodeChildA.aabbMaxY = bvh_aabb[bvhNode.left, 4];
+        bvhNodeChildA.aabbMaxZ = bvh_aabb[bvhNode.left, 5];
 
-        bvhNodeChildB.left = g_lbvh_info[bvhNode.right, 0];
-        bvhNodeChildB.right = g_lbvh_info[bvhNode.right, 1];
-        bvhNodeChildB.primitiveIdx = g_lbvh_info[bvhNode.right, 2];
-        bvhNodeChildB.aabbMinX = g_lbvh_aabb[bvhNode.right, 0];
-        bvhNodeChildB.aabbMinY = g_lbvh_aabb[bvhNode.right, 1];
-        bvhNodeChildB.aabbMinZ = g_lbvh_aabb[bvhNode.right, 2];
-        bvhNodeChildB.aabbMaxX = g_lbvh_aabb[bvhNode.right, 3];
-        bvhNodeChildB.aabbMaxY = g_lbvh_aabb[bvhNode.right, 4];
-        bvhNodeChildB.aabbMaxZ = g_lbvh_aabb[bvhNode.right, 5];
+        bvhNodeChildB.left = bvh_info[bvhNode.right, 0];
+        bvhNodeChildB.right = bvh_info[bvhNode.right, 1];
+        bvhNodeChildB.primitiveIdx = bvh_info[bvhNode.right, 2];
+        bvhNodeChildB.aabbMinX = bvh_aabb[bvhNode.right, 0];
+        bvhNodeChildB.aabbMinY = bvh_aabb[bvhNode.right, 1];
+        bvhNodeChildB.aabbMinZ = bvh_aabb[bvhNode.right, 2];
+        bvhNodeChildB.aabbMaxX = bvh_aabb[bvhNode.right, 3];
+        bvhNodeChildB.aabbMaxY = bvh_aabb[bvhNode.right, 4];
+        bvhNodeChildB.aabbMaxZ = bvh_aabb[bvhNode.right, 5];
     } else {
 
-        bvhNodeChildA.left = g_lbvh_info[nodeIdx + bvhNode.left, 0];
-        bvhNodeChildA.right = g_lbvh_info[nodeIdx + bvhNode.left, 1];
-        bvhNodeChildA.primitiveIdx = g_lbvh_info[nodeIdx + bvhNode.left, 2];
-        bvhNodeChildA.aabbMinX = g_lbvh_aabb[nodeIdx + bvhNode.left, 0];
-        bvhNodeChildA.aabbMinY = g_lbvh_aabb[nodeIdx + bvhNode.left, 1];
-        bvhNodeChildA.aabbMinZ = g_lbvh_aabb[nodeIdx + bvhNode.left, 2];
-        bvhNodeChildA.aabbMaxX = g_lbvh_aabb[nodeIdx + bvhNode.left, 3];
-        bvhNodeChildA.aabbMaxY = g_lbvh_aabb[nodeIdx + bvhNode.left, 4];
-        bvhNodeChildA.aabbMaxZ = g_lbvh_aabb[nodeIdx + bvhNode.left, 5];
+        bvhNodeChildA.left = bvh_info[nodeIdx + bvhNode.left, 0];
+        bvhNodeChildA.right = bvh_info[nodeIdx + bvhNode.left, 1];
+        bvhNodeChildA.primitiveIdx = bvh_info[nodeIdx + bvhNode.left, 2];
+        bvhNodeChildA.aabbMinX = bvh_aabb[nodeIdx + bvhNode.left, 0];
+        bvhNodeChildA.aabbMinY = bvh_aabb[nodeIdx + bvhNode.left, 1];
+        bvhNodeChildA.aabbMinZ = bvh_aabb[nodeIdx + bvhNode.left, 2];
+        bvhNodeChildA.aabbMaxX = bvh_aabb[nodeIdx + bvhNode.left, 3];
+        bvhNodeChildA.aabbMaxY = bvh_aabb[nodeIdx + bvhNode.left, 4];
+        bvhNodeChildA.aabbMaxZ = bvh_aabb[nodeIdx + bvhNode.left, 5];
 
-        bvhNodeChildB.left = g_lbvh_info[nodeIdx + bvhNode.right, 0];
-        bvhNodeChildB.right = g_lbvh_info[nodeIdx + bvhNode.right, 1];
-        bvhNodeChildB.primitiveIdx = g_lbvh_info[nodeIdx + bvhNode.right, 2];
-        bvhNodeChildB.aabbMinX = g_lbvh_aabb[nodeIdx + bvhNode.right, 0];
-        bvhNodeChildB.aabbMinY = g_lbvh_aabb[nodeIdx + bvhNode.right, 1];
-        bvhNodeChildB.aabbMinZ = g_lbvh_aabb[nodeIdx + bvhNode.right, 2];
-        bvhNodeChildB.aabbMaxX = g_lbvh_aabb[nodeIdx + bvhNode.right, 3];
-        bvhNodeChildB.aabbMaxY = g_lbvh_aabb[nodeIdx + bvhNode.right, 4];
-        bvhNodeChildB.aabbMaxZ = g_lbvh_aabb[nodeIdx + bvhNode.right, 5];
+        bvhNodeChildB.left = bvh_info[nodeIdx + bvhNode.right, 0];
+        bvhNodeChildB.right = bvh_info[nodeIdx + bvhNode.right, 1];
+        bvhNodeChildB.primitiveIdx = bvh_info[nodeIdx + bvhNode.right, 2];
+        bvhNodeChildB.aabbMinX = bvh_aabb[nodeIdx + bvhNode.right, 0];
+        bvhNodeChildB.aabbMinY = bvh_aabb[nodeIdx + bvhNode.right, 1];
+        bvhNodeChildB.aabbMinZ = bvh_aabb[nodeIdx + bvhNode.right, 2];
+        bvhNodeChildB.aabbMaxX = bvh_aabb[nodeIdx + bvhNode.right, 3];
+        bvhNodeChildB.aabbMaxY = bvh_aabb[nodeIdx + bvhNode.right, 4];
+        bvhNodeChildB.aabbMaxZ = bvh_aabb[nodeIdx + bvhNode.right, 5];
     }
 
     float3 minA = float3(bvhNodeChildA.aabbMinX, bvhNodeChildA.aabbMinY, bvhNodeChildA.aabbMinZ);
@@ -376,15 +376,15 @@ void set_root(
     bvhNode.aabbMaxY = maxAABB.y;
     bvhNode.aabbMaxZ = maxAABB.z;
 
-    g_lbvh_info[nodeIdx, 0] = bvhNode.left;
-    g_lbvh_info[nodeIdx, 1] = bvhNode.right;
-    g_lbvh_info[nodeIdx, 2] = int(bvhNode.primitiveIdx);
+    bvh_info[nodeIdx, 0] = bvhNode.left;
+    bvh_info[nodeIdx, 1] = bvhNode.right;
+    bvh_info[nodeIdx, 2] = int(bvhNode.primitiveIdx);
 
-    g_lbvh_aabb[nodeIdx, 0] = bvhNode.aabbMinX;
-    g_lbvh_aabb[nodeIdx, 1] = bvhNode.aabbMinY;
-    g_lbvh_aabb[nodeIdx, 2] = bvhNode.aabbMinZ;
-    g_lbvh_aabb[nodeIdx, 3] = bvhNode.aabbMaxX;
-    g_lbvh_aabb[nodeIdx, 4] = bvhNode.aabbMaxY;
-    g_lbvh_aabb[nodeIdx, 5] = bvhNode.aabbMaxZ;
+    bvh_aabb[nodeIdx, 0] = bvhNode.aabbMinX;
+    bvh_aabb[nodeIdx, 1] = bvhNode.aabbMinY;
+    bvh_aabb[nodeIdx, 2] = bvhNode.aabbMinZ;
+    bvh_aabb[nodeIdx, 3] = bvhNode.aabbMaxX;
+    bvh_aabb[nodeIdx, 4] = bvhNode.aabbMaxY;
+    bvh_aabb[nodeIdx, 5] = bvhNode.aabbMaxZ;
 
 }
