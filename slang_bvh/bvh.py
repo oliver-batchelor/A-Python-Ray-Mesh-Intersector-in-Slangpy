@@ -67,11 +67,13 @@ class BVH(TensorClass):
 
          
   @staticmethod 
-  def init(n:int, device:str) -> 'BVH':
+  def init(num_elems:int, device:str) -> 'BVH':
+    num_nodes = num_elems + num_elems - 1
+
     return BVH(
-      info = torch.zeros((n, 3), dtype=torch.int, device=device),
-      aabb = torch.zeros((n, 6), dtype=torch.float, device=device),
-      construction_info = torch.zeros((n, 2), dtype=torch.int, device=device)
+      info = torch.zeros((num_nodes, 3), dtype=torch.int, device=device),
+      aabb = torch.zeros((num_nodes, 6), dtype=torch.float, device=device),
+      construction_info = torch.zeros((num_nodes, 2), dtype=torch.int, device=device)
     )
 
 
@@ -139,7 +141,7 @@ class BVHBuilder:
       block_size = 256
 
       # hierarchy
-      bvh:BVH = BVH.init(num_elems + num_elems - 1, device=self.device)
+      bvh:BVH = BVH.init(num_elems, device=self.device)
       torch.cuda.synchronize()
 
       module.hierarchy(num_elements=num_elems, ele_primitive_idx=prim_idx, ele_aabb=ele_aabb,
@@ -159,3 +161,30 @@ class BVHBuilder:
 
 
       return MeshBVH(mesh, bvh)
+
+  def iterative_bounding_boxes(self, bvh:BVH) -> None:
+      
+      num_elems = bvh.info.shape[0]
+      # bounding_boxes
+      tree_heights = torch.zeros((num_elems, 1), dtype=torch.int, device=self.device)
+      module.get_bvh_height(g_num_elements=num_elems, 
+                                 bvh_info=bvh.info,
+                                 bvh_aabb=bvh.aabb, 
+                                 bvh_construction_infos=bvh.construction_info, 
+                                 tree_heights=tree_heights
+        ).launchRaw(blockSize=(256, 1, 1), gridSize=(round_up(num_elems, 256), 1, 1))
+
+
+      tree_height_max = tree_heights.max()
+      for i in range(tree_height_max):
+          module.get_bbox(g_num_elements=num_elems, 
+                              expected_height=int(i+1),
+                              bvh_info=bvh.info, 
+                              bvh_aabb=bvh.aabb, 
+                              bvh_construction_infos=bvh.construction_info
+              ).launchRaw(blockSize=(256, 1, 1), gridSize=(round_up(num_elems, 256), 1, 1))
+
+
+      module.set_root(bvh_info=bvh.info, bvh_aabb=bvh.aabb
+        ).launchRaw(blockSize=(1, 1, 1), gridSize=(1, 1, 1)) 
+      
