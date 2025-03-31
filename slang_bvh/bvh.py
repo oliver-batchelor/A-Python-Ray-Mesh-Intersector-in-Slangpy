@@ -19,9 +19,14 @@ def round_up(x, multiple):
   return (x + multiple - 1) // multiple
 
 
-class Mesh(TensorClass):
+class Mesh:
   vertices: torch.Tensor # N, 3  float xyz
   indices: torch.Tensor  # N, 3  int index
+
+  def __init__(self, vertices:torch.Tensor, indices:torch.Tensor, device:str):
+    self.vertices = vertices
+    self.indices = indices
+    self.device = device
 
   @property
   def primitive_num(self):
@@ -45,6 +50,9 @@ class Mesh(TensorClass):
 
   def __repr__(self):
     return f"Mesh(n={self.primitive_num})"
+  
+  def __str__(self):
+    return self.__repr__()
 
 class BVH(TensorClass):
   info: torch.Tensor
@@ -64,7 +72,14 @@ class BVH(TensorClass):
     child_count = (left_children != 0).to(torch.int) + (right_children != 0).to(torch.int)
     
     return child_count
+  
+  def visitations(self) -> torch.Tensor:
+    return self.internal.construction_info[:, 1]
 
+  @property
+  def internal(self) -> 'BVH':
+    internal_nodes = self.num_elements - 1
+    return self[internal_nodes:]
          
   @staticmethod 
   def init(num_elems:int, device:str) -> 'BVH':
@@ -73,8 +88,17 @@ class BVH(TensorClass):
     return BVH(
       info = torch.zeros((num_nodes, 3), dtype=torch.int, device=device),
       aabb = torch.zeros((num_nodes, 6), dtype=torch.float, device=device),
-      construction_info = torch.zeros((num_nodes, 2), dtype=torch.int, device=device)
+      construction_info = torch.zeros((num_nodes, 2), dtype=torch.int, device=device),
+      batch_size=(num_nodes, ),
     )
+  
+  @property
+  def num_elements(self):
+    return (self.info.shape[0] + 1) // 2
+  
+  @property
+  def num_nodes(self):
+    return self.info.shape[0]
 
 
 @dataclass
@@ -142,7 +166,6 @@ class BVHBuilder:
 
       # hierarchy
       bvh:BVH = BVH.init(num_elems, device=self.device)
-      torch.cuda.synchronize()
 
       module.hierarchy(num_elements=num_elems, ele_primitive_idx=prim_idx, ele_aabb=ele_aabb,
                           sorted_codes=spatial_codes, 
@@ -150,41 +173,46 @@ class BVHBuilder:
                           bvh_aabb=bvh.aabb, 
                           bvh_construction_infos=bvh.construction_info
         ).launchRaw(blockSize=(block_size, 1, 1), gridSize=(round_up(num_elems, block_size), 1, 1))
-      torch.cuda.synchronize()
 
-      module.bounding_boxes(num_elements=num_elems,
-                     bvh_info=bvh.info,
-                     bvh_aabb=bvh.aabb,
-                     bvh_construction_infos=bvh.construction_info
-        ).launchRaw(blockSize=(block_size, 1, 1), gridSize=(round_up(num_elems, block_size), 1, 1))
-      torch.cuda.synchronize()
+      # module.bounding_boxes(num_elements=num_elems,
+      #                bvh_info=bvh.info,
+      #                bvh_aabb=bvh.aabb,
+      #                bvh_construction_infos=bvh.construction_info
+      #   ).launchRaw(blockSize=(block_size, 1, 1), gridSize=(round_up(num_elems, block_size), 1, 1))
+
+
+
+      self.iterative_bounding_boxes(bvh)
 
 
       return MeshBVH(mesh, bvh)
 
   def iterative_bounding_boxes(self, bvh:BVH) -> None:
       
-      num_elems = bvh.info.shape[0]
+      num_elems = bvh.num_elements
+      num_internal = num_elems - 1
+
       # bounding_boxes
-      tree_heights = torch.zeros((num_elems, 1), dtype=torch.int, device=self.device)
-      module.get_bvh_height(g_num_elements=num_elems, 
-                                 bvh_info=bvh.info,
-                                 bvh_aabb=bvh.aabb, 
-                                 bvh_construction_infos=bvh.construction_info, 
-                                 tree_heights=tree_heights
-        ).launchRaw(blockSize=(256, 1, 1), gridSize=(round_up(num_elems, 256), 1, 1))
+      tree_heights = torch.zeros((num_internal, 1), dtype=torch.int, device=self.device)
+      module.get_bvh_height(num_elements=num_elems, bvh_construction_infos=bvh.construction_info, 
+                            tree_heights=tree_heights
+        ).launchRaw(blockSize=(256, 1, 1), gridSize=(round_up(num_internal, 256), 1, 1))
 
 
       tree_height_max = tree_heights.max()
-      for i in range(tree_height_max):
-          module.get_bbox(g_num_elements=num_elems, 
-                              expected_height=int(i+1),
-                              bvh_info=bvh.info, 
-                              bvh_aabb=bvh.aabb, 
-                              bvh_construction_infos=bvh.construction_info
-              ).launchRaw(blockSize=(256, 1, 1), gridSize=(round_up(num_elems, 256), 1, 1))
+      print(tree_height_max)
+      # for i in range(tree_height_max):
+      #     module.get_bbox(num_elements=num_elems, 
+      #                         expected_height=int(i+1),
+                              
+      #                         bvh_info=bvh.info, 
+      #                         bvh_aabb=bvh.aabb, 
+      #                         bvh_construction_infos=bvh.construction_info
+      #         ).launchRaw(blockSize=(256, 1, 1), gridSize=(round_up(num_elems - 1, 256), 1, 1))
 
 
       module.set_root(bvh_info=bvh.info, bvh_aabb=bvh.aabb
         ).launchRaw(blockSize=(1, 1, 1), gridSize=(1, 1, 1)) 
+      
+
       
