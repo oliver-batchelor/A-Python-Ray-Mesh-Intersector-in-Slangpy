@@ -29,10 +29,13 @@ struct Triangle {
       return dot(E2, Q) * invDet;
     }
 
-    static Triangle load(TensorView<float> vert, TensorView<int> indices, int idx) {
-        float3 v0 = load_float3(vert, indices[idx, 0]);
-        float3 v1 = load_float3(vert, indices[idx, 1]);
-        float3 v2 = load_float3(vert, indices[idx, 2]);
+    static Triangle load(
+          TensorView<float> vertices, 
+          TensorView<int> indices, int idx) {
+            
+        float3 v0 = load_float3(vertices, indices[idx, 0]);
+        float3 v1 = load_float3(vertices, indices[idx, 1]);
+        float3 v2 = load_float3(vertices, indices[idx, 2]);
         return Triangle(v0, v1, v2);
     }
 };

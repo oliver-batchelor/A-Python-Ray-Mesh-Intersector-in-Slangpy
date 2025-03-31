@@ -10,8 +10,7 @@ from slang_bvh.util.radix_sort import radix_sort_pairs
   
 slang_path = Path(__file__).parent / 'slang'
 module = slangtorch.loadModule(slang_path / 'slang_bvh.slang', 
-                               extraCudaFlags=["-diag-suppress=177"],
-                               extraSlangFlags=["-O3"])
+                               extraCudaFlags=["-diag-suppress=177"])
 
 
 
@@ -30,10 +29,8 @@ class Mesh(TensorClass):
   
   def aabb(self):  
     aabb = torch.zeros((self.primitive_num, 6), dtype=torch.float, device=self.vertices.device)
-
     module.triangle_aabb(vertices=self.vertices, indices=self.indices, aabb=aabb
       ).launchRaw(blockSize=(256, 1, 1), gridSize=(round_up(self.primitive_num, 256), 1, 1))
-    
     return aabb   
 
   @staticmethod
@@ -46,18 +43,35 @@ class Mesh(TensorClass):
       device=device
     )
 
+  def __repr__(self):
+    return f"Mesh(n={self.primitive_num})"
+
 class BVH(TensorClass):
   info: torch.Tensor
   aabb: torch.Tensor
   construction_info: torch.Tensor
 
+
+  def count_children(self) -> torch.Tensor:
+    """Counts number of children for each node in the BVH.
+    Returns tensor of size (N,) where N is number of nodes."""
+    
+    # Extract left and right child indices from self.info
+    left_children = self.info[:, 0]  # first column contains left child
+    right_children = self.info[:, 1]  # second column contains right child
+    
+    # Count non-zero children (0 indicates no child)
+    child_count = (left_children != 0).to(torch.int) + (right_children != 0).to(torch.int)
+    
+    return child_count
+
          
   @staticmethod 
   def init(n:int, device:str) -> 'BVH':
     return BVH(
-      info = torch.empty((n, 3), dtype=torch.int, device=device),
-      aabb = torch.empty((n, 6), dtype=torch.float, device=device),
-      construction_info = torch.empty((n, 2), dtype=torch.int, device=device)
+      info = torch.zeros((n, 3), dtype=torch.int, device=device),
+      aabb = torch.zeros((n, 6), dtype=torch.float, device=device),
+      construction_info = torch.zeros((n, 2), dtype=torch.int, device=device)
     )
 
 
@@ -80,7 +94,7 @@ class MeshBVH:
 
     module.intersect(ray_origins=ray_origins, ray_directions=ray_directions,
                   bvh_info=self.bvh.info, bvh_aabb=self.bvh.aabb,
-                  vert=self.mesh.vertices, v_indx=self.mesh.indices,
+                  vertices=self.mesh.vertices, indices=self.mesh.indices,
                   hit_idx=hit_idx, hit_t=hit_t
       ).launchRaw(blockSize=(16, 16, 1), gridSize=(round_up(h, 16), round_up(w, 16), 1))
     
@@ -92,12 +106,20 @@ def aabb_morton_codes(aabb:torch.Tensor) -> torch.Tensor:
   max_extent = aabb[:, 3:6].max(0).values.tolist()
   
   num_elems = aabb.shape[0]
-  morton_codes = torch.zeros((num_elems, 2), dtype=torch.int, device=aabb.device)
-  module.morton_codes_aabb(num_elements=num_elems, min_extent=min_extent, max_extent=max_extent, 
-                            aabb=aabb, morton_codes=morton_codes
+  codes = torch.zeros((num_elems, 2), dtype=torch.int, device=aabb.device)
+  module.morton_codes_aabb(min_extent=min_extent, max_extent=max_extent, 
+                            aabb=aabb, morton_codes=codes
     ).launchRaw(blockSize=(256, 1, 1), gridSize=(round_up(num_elems, 256), 1, 1))
 
-  return morton_codes
+  return codes
+
+
+
+def aabb_centroids(aabb:torch.Tensor) -> torch.Tensor:
+  lower, upper = aabb[:, 0:3], aabb[:, 3:6]
+  centroids = (lower + upper) * 0.5
+  return centroids
+
 
 
 class BVHBuilder:
@@ -111,30 +133,29 @@ class BVHBuilder:
       prim_idx = torch.arange(0, num_elems, dtype=torch.int32, device=mesh.device)
 
       ele_aabb = mesh.aabb()
-      morton_codes = aabb_morton_codes(ele_aabb)
-      radix_sort_pairs(morton_codes)
-
+      spatial_codes = aabb_morton_codes(ele_aabb)
+      radix_sort_pairs(spatial_codes)
+      
       block_size = 256
 
       # hierarchy
       bvh:BVH = BVH.init(num_elems + num_elems - 1, device=self.device)
+      torch.cuda.synchronize()
 
       module.hierarchy(num_elements=num_elems, ele_primitive_idx=prim_idx, ele_aabb=ele_aabb,
-                          sorted_codes=morton_codes, 
+                          sorted_codes=spatial_codes, 
                           bvh_info=bvh.info, 
                           bvh_aabb=bvh.aabb, 
                           bvh_construction_infos=bvh.construction_info
         ).launchRaw(blockSize=(block_size, 1, 1), gridSize=(round_up(num_elems, block_size), 1, 1))
       torch.cuda.synchronize()
 
-
-
       module.bounding_boxes(num_elements=num_elems,
                      bvh_info=bvh.info,
                      bvh_aabb=bvh.aabb,
                      bvh_construction_infos=bvh.construction_info
         ).launchRaw(blockSize=(block_size, 1, 1), gridSize=(round_up(num_elems, block_size), 1, 1))
-
+      torch.cuda.synchronize()
 
 
       return MeshBVH(mesh, bvh)

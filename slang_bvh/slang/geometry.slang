@@ -34,10 +34,9 @@ struct BVHNode {
 
 
 struct Hit {
-  float t_hit;
+  float t;
   int idx;
 };
-
 
 
 struct Ray {

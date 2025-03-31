@@ -5,7 +5,8 @@ import "geometry.slang";
 // For bottom-up construction - only uses child bounds
 AABB bounds_from_children(BVHNode node, TensorView<float> bvh_aabb) {
     AABB bounds = AABB.invalid();
-    if (node.left != 0) bounds = AABB.load(bvh_aabb, node.left);
+    
+    if (node.left != 0) bounds = bounds.union(AABB.load(bvh_aabb, node.left));
     if (node.right != 0) bounds = bounds.union(AABB.load(bvh_aabb, node.right));
     return bounds;
 }

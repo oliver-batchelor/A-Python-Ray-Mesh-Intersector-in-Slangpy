@@ -45,7 +45,6 @@ uint64_t morton64(float3 p) {
 [AutoPyBindCUDA]
 [CUDAKernel]
 void morton_codes_aabb(float3 min_extent, float3 max_extent,
-                  int num_elements, 
 
                   TensorView<float> aabb,
                   TensorView<int> morton_codes) 
@@ -53,7 +52,7 @@ void morton_codes_aabb(float3 min_extent, float3 max_extent,
     // Get the 'global' index of this thread.
     uint3 dispatchIdx = cudaThreadIdx() + cudaBlockIdx() * cudaBlockDim();
     uint idx = dispatchIdx.x;
-    if (idx >= num_elements) return;
+    if (idx >= aabb.size(0)) return;
 
     var min_bound = float3(aabb[idx, 0], aabb[idx, 1], aabb[idx, 2]);
     var max_bound = float3(aabb[idx, 3], aabb[idx, 4], aabb[idx, 5]);
@@ -67,4 +66,18 @@ void morton_codes_aabb(float3 min_extent, float3 max_extent,
 
     morton_codes[idx, 0] = int(mortonCode);
     morton_codes[idx, 1] = int(idx);
+}
+
+[AutoPyBindCUDA]
+[CUDAKernel]
+void morton_codes(TensorView<float> points,
+                  TensorView<int> morton_codes) 
+{
+    // Get the 'global' index of this thread.
+    uint3 dispatchIdx = cudaThreadIdx() + cudaBlockIdx() * cudaBlockDim();
+    uint idx = dispatchIdx.x;
+    if (idx >= points.size(0)) return;
+
+    var point = float3(points[idx, 0], points[idx, 1], points[idx, 2]);
+    morton_codes[idx] = int(morton32(point));
 }

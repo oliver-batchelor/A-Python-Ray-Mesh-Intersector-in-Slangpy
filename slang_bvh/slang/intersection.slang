@@ -3,16 +3,36 @@
 import "geometry.slang";
 import "triangle.slang";
 
+interface IPrimitiveType {
+  Optional<float> hit(Ray ray, int primitive_idx);
 
-Optional<Hit> bvh_hit(TensorView<int> bvh_info, TensorView<float> bvh_aabb,
-             TensorView<float> vert, TensorView<int> v_indx,
-             Ray ray) {
+};
+
+
+struct Triangles : IPrimitiveType {
+  TensorView<float> vertices;
+  TensorView<int> indices;
+
+  Optional<float> hit(Ray ray, int primitive_idx) {
+    let tri = Triangle.load(vertices, indices, primitive_idx);
+    return tri.hit(ray);
+  }
+};
+
+
+
+Hit bvh_hit<Primitives : IPrimitiveType>(
+    TensorView<int> bvh_info,
+    TensorView<float> bvh_aabb,
+    Primitives primitives,
+    Ray ray) 
+  {
   BVHNode stack[MAX_STACK_SIZE];
   int count = 0;
 
   /* Add root node */
   stack[count++] = BVHNode.load(bvh_info, 0);
-  Optional<Hit> closest_hit = none;
+  Hit closest_hit = Hit(1e9, -1);
 
   while (count > 0) {
     BVHNode node = stack[--count];
@@ -28,11 +48,12 @@ Optional<Hit> bvh_hit(TensorView<int> bvh_info, TensorView<float> bvh_aabb,
 
     } else {  
       // Leaf node
-      let triangle = Triangle.load(vert, v_indx, node.primitive_idx);
     
-      if (let hit = triangle.hit(ray)) {
-        ray.t_max = min(hit, ray.t_max);
-        closest_hit = Hit(hit, node.primitive_idx);
+      if (let t = primitives.hit(ray, node.primitive_idx)) {
+        if (closest_hit.t > t) {
+          // ray.t_max = t;
+          closest_hit = Hit(t, node.primitive_idx);
+        }
         
       }
     }
@@ -46,7 +67,7 @@ Optional<Hit> bvh_hit(TensorView<int> bvh_info, TensorView<float> bvh_aabb,
 [CUDAKernel]
 void intersect(TensorView<float> ray_origins, TensorView<float> ray_directions,
                TensorView<int> bvh_info, TensorView<float> bvh_aabb,
-               TensorView<float> vert, TensorView<int> v_indx,
+               TensorView<float> vertices, TensorView<int> indices,
                TensorView<float> hit_t, TensorView<int> hit_idx)
 {
     uint3 dispatchIdx = cudaThreadIdx() + cudaBlockIdx() * cudaBlockDim();
@@ -55,14 +76,9 @@ void intersect(TensorView<float> ray_origins, TensorView<float> ray_directions,
 
     let ray = Ray.load(ray_origins, ray_directions, pixel);
 
-    if(let hit = bvh_hit(bvh_info, bvh_aabb, vert, v_indx, ray)) {
-        hit_t[pixel] = hit.t_hit;
-        hit_idx[pixel] = hit.idx;
+    let triangles = Triangles(vertices, indices);
+    let hit = bvh_hit(bvh_info, bvh_aabb, triangles, ray);
 
-    } else {
-        hit_t[pixel] = 1e9;
-        hit_idx[pixel] = -1;
-        
-    }
-
+    hit_t[pixel] = hit.t;
+    hit_idx[pixel] = hit.idx;
 }
