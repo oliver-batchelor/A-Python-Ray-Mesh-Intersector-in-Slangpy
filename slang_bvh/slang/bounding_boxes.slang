@@ -41,9 +41,8 @@ void get_bvh_height(int num_elements, TensorView<int> bvh_construction_infos, Te
 {
     uint idx = cudaThreadIdx().x + cudaBlockIdx().x * cudaBlockDim().x;
     if (idx >= num_elements - 1) return;
-    const int leaf_offset = num_elements - 1;
 
-    uint node_idx = bvh_construction_infos[leaf_offset + idx, 0];
+    uint node_idx = idx;
     int height = 0;
     
     while (node_idx != 0) {
@@ -66,29 +65,18 @@ void get_bbox(
     TensorView<int> bvh_construction_infos,
     TensorView<int> tree_heights) {
       
-    uint thread_idx = cudaThreadIdx().x + cudaBlockIdx().x * cudaBlockDim().x;
+    uint idx = cudaThreadIdx().x + cudaBlockIdx().x * cudaBlockDim().x;
     const int leaf_offset = num_elements - 1;
-    let idx = thread_idx + leaf_offset;
 
-    if (idx >= bvh_construction_infos.size(0)) return;
-
-    uint node_idx = bvh_construction_infos[leaf_offset + idx, 0];
+    if (idx >= num_elements - 1) return;
     int height = tree_heights[idx];
             
     if (height == expected_height) {
-        BVHNode node = BVHNode.load(bvh_info, node_idx);
-        bounds_from_children(node, bvh_aabb).store(bvh_aabb, node_idx);
+        BVHNode node = BVHNode.load(bvh_info, idx);
+        bounds_from_children(node, bvh_aabb).store(bvh_aabb, idx);
     }
 }
 
-[AutoPyBindCUDA]
-[CUDAKernel]
-void set_root(TensorView<int> bvh_info, TensorView<float> bvh_aabb)
-{
-    uint node_idx = 0;  // Root node
-    BVHNode node = BVHNode.load(bvh_info, node_idx);
-    bounds_from_children(node, bvh_aabb).store(bvh_aabb, node_idx);
-}
 
 
 

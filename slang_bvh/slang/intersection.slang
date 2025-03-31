@@ -51,7 +51,7 @@ Hit bvh_hit<Primitives : IPrimitiveType>(
     
       if (let t = primitives.hit(ray, node.primitive_idx)) {
         if (closest_hit.t > t) {
-          // ray.t_max = t;
+          ray.t_max = t;
           closest_hit = Hit(t, node.primitive_idx);
         }
         
@@ -65,7 +65,7 @@ Hit bvh_hit<Primitives : IPrimitiveType>(
 
 [AutoPyBindCUDA]
 [CUDAKernel]
-void intersect(TensorView<float> ray_origins, TensorView<float> ray_directions,
+void intersect_triangles(TensorView<float> ray_origins, TensorView<float> ray_directions,
                TensorView<int> bvh_info, TensorView<float> bvh_aabb,
                TensorView<float> vertices, TensorView<int> indices,
                TensorView<float> hit_t, TensorView<int> hit_idx)

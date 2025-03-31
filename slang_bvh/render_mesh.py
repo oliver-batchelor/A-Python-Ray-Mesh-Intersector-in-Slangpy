@@ -35,10 +35,10 @@ def prim_colors(hit_idx:torch.Tensor, mesh:Mesh):
   hit_colors[mask] = colors[hit_idx[mask]]
   return hit_colors
 
-def pos_colors(mask:torch.Tensor, hit_pos:torch.Tensor):
+def pos_colors(mask:torch.Tensor, hit_pos:torch.Tensor, mesh:Mesh):
 
-  min_pos = hit_pos[mask].min(dim=0).values
-  max_pos = hit_pos[mask].max(dim=0).values
+  min_pos = mesh.vertices.min(dim=0).values
+  max_pos = mesh.vertices.max(dim=0).values
   extent = max_pos - min_pos
 
   h, w = hit_pos.shape[:2]
@@ -106,7 +106,7 @@ def main():
     hit_pos = torch.zeros_like(ray_origins)
     hit_pos[mask] = ray_origins[mask] + ray_directions[mask] * hit_t[mask].unsqueeze(-1)
 
-    image = pos_colors(mask, hit_pos)
+    image = pos_colors(mask, hit_pos, mesh)
     display(image, title='hit_pos')
 
     # prim_image = prim_colors(hit_idx, mesh)

@@ -17,7 +17,8 @@ dependencies = [
     "tqdm",
     "pandas",
     "pyexr",
-    "trimesh"
+    "trimesh",
+    "space-filling-pytorch"
 ]
 
 [tool.setuptools.package-dir]

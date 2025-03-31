@@ -42,31 +42,6 @@ uint64_t morton64(float3 p) {
 
 
 
-[AutoPyBindCUDA]
-[CUDAKernel]
-void morton_codes_aabb(float3 min_extent, float3 max_extent,
-
-                  TensorView<float> aabb,
-                  TensorView<int> morton_codes) 
-{
-    // Get the 'global' index of this thread.
-    uint3 dispatchIdx = cudaThreadIdx() + cudaBlockIdx() * cudaBlockDim();
-    uint idx = dispatchIdx.x;
-    if (idx >= aabb.size(0)) return;
-
-    var min_bound = float3(aabb[idx, 0], aabb[idx, 1], aabb[idx, 2]);
-    var max_bound = float3(aabb[idx, 3], aabb[idx, 4], aabb[idx, 5]);
-
-    // calculate center
-    float3 center = (min_bound + 0.5 * (max_bound - min_bound));
-    // map to unit cube
-    float3 normalized_centre = (center - min_extent) / (max_extent - min_extent);
-    // assign morton code
-    uint mortonCode = morton32(normalized_centre);
-
-    morton_codes[idx, 0] = int(mortonCode);
-    morton_codes[idx, 1] = int(idx);
-}
 
 [AutoPyBindCUDA]
 [CUDAKernel]
@@ -80,4 +55,5 @@ void morton_codes(TensorView<float> points,
 
     var point = float3(points[idx, 0], points[idx, 1], points[idx, 2]);
     morton_codes[idx] = int(morton32(point));
+
 }

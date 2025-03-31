@@ -76,10 +76,11 @@ int findSplit(int first, int last, uint num_elements, TensorView<int> sorted_cod
 
 [AutoPyBindCUDA]
 [CUDAKernel]
-void hierarchy(uint num_elements, 
-               TensorView<int> ele_primitive_idx,
+void build_hierarchy(uint num_elements, 
                TensorView<float> ele_aabb,
+
                TensorView<int> sorted_codes, 
+               TensorView<int> primitive_indices,
                
                // outputs
                TensorView<int> bvh_info, 
@@ -87,16 +88,16 @@ void hierarchy(uint num_elements,
                TensorView<int> bvh_construction_infos)
 {
     uint3 dispatchIdx = cudaThreadIdx() + cudaBlockIdx() * cudaBlockDim();
-    uint bvh_idx = dispatchIdx.x;
-    if (bvh_idx >= num_elements) return;
+    uint idx = dispatchIdx.x;
+    if (idx >= num_elements) return;
     const int leaf_offset = int(num_elements) - 1;
 
     // construct leaf nodes
-    if (bvh_idx < num_elements) {
-        int sorted_idx = sorted_codes[bvh_idx, 1];
-        uint primitive_idx = ele_primitive_idx[sorted_idx, 0];
+    if (idx < num_elements) {
+        int sorted_idx = sorted_codes[idx];
+        uint primitive_idx = primitive_indices[idx];
 
-        int node_idx = leaf_offset + bvh_idx;
+        int node_idx = leaf_offset + idx;
         let node = BVHNode(node_idx, 0, 0, primitive_idx);
 
         node.store(bvh_info);
@@ -105,12 +106,12 @@ void hierarchy(uint num_elements,
     }
 
     // construct internal nodes
-    if (bvh_idx < num_elements - 1) {
+    if (idx < num_elements - 1) {
         int first, last;
-        determineRange(int(bvh_idx), first, last, num_elements, sorted_codes);
+        determineRange(idx, first, last, num_elements, sorted_codes);
         int split = findSplit(first, last, num_elements, sorted_codes);
 
-        let node = BVHNode(bvh_idx,
+        let node = BVHNode(idx,
           (split == first) ? leaf_offset + split : split,
           (split + 1 == last) ? leaf_offset + split + 1 : split + 1,
           -1
@@ -118,19 +119,19 @@ void hierarchy(uint num_elements,
 
         node.store(bvh_info);
 
-        let aabb = AABB.invalid();
-        aabb.store(bvh_aabb, bvh_idx);
+        const AABB aabb = AABB.invalid();
+        aabb.store(bvh_aabb, idx);
 
         // Store construction info for children
-        bvh_construction_infos[node.left, 0] = bvh_idx;
+        bvh_construction_infos[node.left, 0] = idx;
         bvh_construction_infos[node.left, 1] = 0;
 
-        bvh_construction_infos[node.right, 0] = bvh_idx;
+        bvh_construction_infos[node.right, 0] = idx;
         bvh_construction_infos[node.right, 1] = 0;
     }
 
     // Set root node construction info
-    if (bvh_idx == 0) {
+    if (idx == 0) {
         bvh_construction_infos[0, 0] = 0;
         bvh_construction_infos[0, 1] = 0;
     }
